@@ -74,6 +74,19 @@ class PruneRequest(BaseModel):
     dry_run: bool = Field(default=False, description="Calculate prune count without deleting")
 
 
+class CadMetadata(BaseModel):
+    """Metadata detailing 3D / CAD model dimensions, geometry, and units."""
+
+    dim_x: float | None = Field(default=None, description="Bounding extent along X axis")
+    dim_y: float | None = Field(default=None, description="Bounding extent along Y axis")
+    dim_z: float | None = Field(default=None, description="Bounding extent along Z axis")
+    unit: str = Field(default="mm", description="Measurement unit (e.g. mm, cm, in)")
+    vertex_count: int | None = Field(default=None, ge=0, description="Total vertex count")
+    face_count: int | None = Field(default=None, ge=0, description="Total triangle/face count")
+    format: str | None = Field(default=None, description="Model format tag (glb, gltf, stl)")
+    attributes: dict[str, Any] = Field(default_factory=dict, description="Custom metadata attributes")
+
+
 class AgentFeedbackEnvelope(BaseModel):
     """Standardized 6-part diagnostic failure envelope for AI agents and operators."""
 

@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .cad_viewer_renderer import CadViewerRenderer
 from .database import PreviewRegistryRepository
 from .diagnostic_tap import DiagnosticTapRingBuffer
 from .markdown_diff_renderer import MarkdownDiffRenderer
@@ -20,6 +21,7 @@ from .mermaid_sanitizer import (
     shorten_external_url,
 )
 from .mermaid_studio_renderer import MermaidStudioRenderer
+from .models import PreviewRecord
 from .retention_service import DEFAULT_TTL_DAYS, PreviewRetentionService
 
 DEFAULT_PREVIEWS_DIR = Path(
@@ -118,19 +120,13 @@ class PreviewPublicationService:
         if target_port is not None:
             meta["target_port"] = int(target_port)
 
-        (slot_dir / "_meta.json").write_text(
-            json.dumps(meta, indent=2), encoding="utf-8"
-        )
+        (slot_dir / "_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self._repo.sync_with_filesystem()
-
         result = {
-            "id": slot_dir.name,
-            "title": meta["title"],
-            "category": category,
+            "id": slot_dir.name, "title": meta["title"], "category": category,
             "url": f"https://{self._base_domain}/{slot_dir.name}/",
             "lan_url": f"http://{self._lan_domain}/{slot_dir.name}/",
-            "permanent": bool(keep),
-            "expires_at": expires_at,
+            "permanent": bool(keep), "expires_at": expires_at,
         }
         self._tap.record("publish_slot", result)
         return result
@@ -180,14 +176,9 @@ class PreviewPublicationService:
             f"{pub['url']}\n"
         )
         return {
-            "id": pub["id"],
-            "code": sanitized,
-            "lan_url": pub["lan_url"],
-            "remote_url": pub["url"],
-            "url": pub["lan_url"],
-            "direct_url": direct_url,
-            "short_url": short_url,
-            "preview": {"lan": pub["lan_url"], "remote": pub["url"]},
+            "id": pub["id"], "code": sanitized, "lan_url": pub["lan_url"],
+            "remote_url": pub["url"], "url": pub["lan_url"], "direct_url": direct_url,
+            "short_url": short_url, "preview": {"lan": pub["lan_url"], "remote": pub["url"]},
             "markdown": markdown,
         }
 
@@ -360,7 +351,19 @@ class PreviewPublicationService:
                 entrypoint = files[0] if files else "index.html"
         else:
             ext = source.suffix.lower()
-            if ext in (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"):
+            if ext in (".glb", ".gltf", ".stl"):
+                resolved_category = category or "3D Model"
+                shutil.copy2(source, slot_dir / source.name)
+                rec = PreviewRecord(
+                    id=slot_dir.name, title=resolved_title, agent=agent or "Antigravity",
+                    category=resolved_category, url=f"https://{self._base_domain}/{slot_dir.name}/",
+                    lan_url=f"http://{self._lan_domain}/{slot_dir.name}/", permanent=bool(keep),
+                    created_at=datetime.datetime.now(datetime.UTC).isoformat(),
+                    updated_at=datetime.datetime.now(datetime.UTC).isoformat(),
+                )
+                cad_html = CadViewerRenderer.render_cad_viewer_html(record=rec, asset_filename=source.name)
+                (slot_dir / "index.html").write_text(cad_html, encoding="utf-8")
+            elif ext in (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"):
                 resolved_category = category or "Image"
                 shutil.copy2(source, slot_dir / source.name)
                 wrapper = MarkdownDiffRenderer.render_media_wrapper_html(
