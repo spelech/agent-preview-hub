@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent_preview_hub.api import create_app
+from agent_preview_hub.cli import main_agent_preview
 from agent_preview_hub.models import CadMetadata, CadPublishRequest
 from agent_preview_hub.publication_service import PreviewPublicationService
 
@@ -163,7 +164,7 @@ async def test_fastapi_cad_endpoint_roundtrip(tmp_path: Path):
                 "keep": False,
             },
         )
-        assert r.status_code == 200
+        assert r.status_code in (200, 201)
         data = r.json()
         assert data["status"] == "ok"
         slug = data["id"]
@@ -178,3 +179,108 @@ async def test_fastapi_cad_endpoint_roundtrip(tmp_path: Path):
         cad_item = next(i for i in items if i["id"] == slug)
         assert cad_item["category"] == "CAD / 3D"
         assert cad_item["title"] == "Robotic Arm Assembly"
+
+
+@pytest.mark.asyncio
+async def test_fastapi_cad_upload_multipart_endpoint(tmp_path: Path):
+    """Verify multipart file upload on /api/cad/upload for 3D model formats and validation errors."""
+    app = create_app(previews_dir=tmp_path)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        # 1. Valid .stl file upload
+        stl_bytes = b"solid test\nfacet normal 0 0 0\nouter loop\nvertex 0 0 0\nendloop\nendfacet\nendsolid test\n"
+        r = await client.post(
+            "/api/cad/upload",
+            files={"file": ("bracket.stl", stl_bytes, "application/sla")},
+            data={"title": "Custom Bracket", "keep": "true"},
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["status"] == "ok"
+        slug = data["id"]
+        assert slug.startswith("cad-")
+        assert data["lan_url"] == f"http://preview.lan/{slug}/"
+        assert (tmp_path / slug / "model.stl").exists()
+        assert (tmp_path / slug / "index.html").exists()
+
+        # 2. Unsupported extension (.txt) returns 400
+        r_bad = await client.post(
+            "/api/cad/upload",
+            files={"file": ("notes.txt", b"plain text", "text/plain")},
+        )
+        assert r_bad.status_code == 400
+        assert "Unsupported CAD file extension" in r_bad.json()["detail"]
+
+        # 3. Empty file returns 400
+        r_empty = await client.post(
+            "/api/cad/upload",
+            files={"file": ("empty.step", b"", "application/octet-stream")},
+        )
+        assert r_empty.status_code == 400
+        assert "empty" in r_empty.json()["detail"].lower()
+
+
+def test_cli_cad_and_3d_subcommands(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Verify agent-preview cad and agent-preview 3d CLI subcommands."""
+    # Create test CAD model
+    cad_model = tmp_path / "gear.stl"
+    cad_model.write_bytes(b"solid gear\nendsolid gear\n")
+
+    # 1. agent-preview cad <file> --title <title>
+    ret = main_agent_preview(
+        [
+            "--dir",
+            str(tmp_path),
+            "cad",
+            str(cad_model),
+            "--title",
+            "Motor Gear",
+        ]
+    )
+    assert ret == 0
+    captured = capsys.readouterr()
+    assert "Motor Gear" in captured.out
+    assert "http://preview.lan/cad-" in captured.out
+
+    # 2. agent-preview 3d <file> --json
+    glb_model = tmp_path / "housing.glb"
+    glb_model.write_bytes(b"glTF binary dummy")
+    ret_json = main_agent_preview(
+        [
+            "--dir",
+            str(tmp_path),
+            "3d",
+            str(glb_model),
+            "--json",
+        ]
+    )
+    assert ret_json == 0
+    captured_json = capsys.readouterr()
+    parsed = json.loads(captured_json.out)
+    assert parsed["id"].startswith("cad-")
+    assert parsed["category"] == "CAD / 3D"
+
+    # 3. Missing file returns non-zero
+    ret_missing = main_agent_preview(
+        [
+            "--dir",
+            str(tmp_path),
+            "cad",
+            str(tmp_path / "ghost.glb"),
+        ]
+    )
+    assert ret_missing == 1
+
+    # 4. Unsupported extension returns non-zero
+    bad_file = tmp_path / "invalid.pdf"
+    bad_file.write_bytes(b"%PDF dummy")
+    ret_bad = main_agent_preview(
+        [
+            "--dir",
+            str(tmp_path),
+            "cad",
+            str(bad_file),
+        ]
+    )
+    assert ret_bad == 1

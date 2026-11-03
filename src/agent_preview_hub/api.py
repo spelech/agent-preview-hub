@@ -5,12 +5,13 @@ from __future__ import annotations
 import datetime
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .cad_staging_renderer import CadStagingRenderer
 from .models import (
     BatchDeleteRequest,
     CadPublishRequest,
@@ -85,8 +86,8 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/api/cad")
-    @app.post("/cad")
+    @app.post("/api/cad", status_code=201)
+    @app.post("/cad", status_code=201)
     async def publish_cad_endpoint(req: CadPublishRequest) -> dict[str, Any]:
         try:
             res = service.publish_cad(
@@ -99,6 +100,40 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
                 keep=req.keep,
                 category=req.category,
                 metadata=req.metadata,
+            )
+            return {"status": "ok", **res}
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cad/upload", status_code=201)
+    @app.post("/cad/upload", status_code=201)
+    async def upload_cad_endpoint(
+        file: Annotated[UploadFile, File(...)],
+        title: Annotated[str, Form()] = "CAD Model Preview",
+        agent: Annotated[str, Form()] = "Antigravity",
+        slug: Annotated[str | None, Form()] = None,
+        keep: Annotated[bool, Form()] = False,
+    ) -> dict[str, Any]:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Missing file name")
+        file_name = file.filename
+        if not CadStagingRenderer.is_cad_file(file_name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported CAD file extension: {Path(file_name).suffix}",
+            )
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        resolved_title = title if title != "CAD Model Preview" else file_name
+        try:
+            res = service.publish_cad(
+                file_name=file_name,
+                file_bytes=file_bytes,
+                slug=slug,
+                title=resolved_title,
+                agent=agent,
+                keep=keep,
             )
             return {"status": "ok", **res}
         except (ValueError, FileNotFoundError) as exc:
