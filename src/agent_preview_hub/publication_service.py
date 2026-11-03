@@ -11,17 +11,17 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .cad_viewer_renderer import CadViewerRenderer
 from .database import PreviewRegistryRepository
 from .diagnostic_tap import DiagnosticTapRingBuffer
-from .cad_viewer_renderer import CadViewerRenderer
 from .markdown_diff_renderer import MarkdownDiffRenderer
 from .mermaid_sanitizer import (
     build_mermaid_live_url,
     sanitize_mermaid_code,
     shorten_external_url,
 )
-from .models import PreviewRecord
 from .mermaid_studio_renderer import MermaidStudioRenderer
+from .models import PreviewRecord
 from .retention_service import DEFAULT_TTL_DAYS, PreviewRetentionService
 
 DEFAULT_PREVIEWS_DIR = Path(
