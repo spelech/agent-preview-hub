@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
 import html
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
+
+from .cad_viewer_renderer import CadViewerRenderer
+from .models import CadMetadata, PreviewRecord
 
 
 class CadStagingRenderer:
@@ -27,6 +31,8 @@ class CadStagingRenderer:
         file_path: str | Path | None = None,
     ) -> Path:
         """Safely stage binary asset into dest_dir/model.<ext> with 0o644 permissions."""
+        if not cls.is_cad_file(file_name):
+            raise ValueError(f"Unsupported CAD file extension: {Path(file_name).suffix}")
         dest_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
         raw_ext = Path(file_name).suffix.lower() or ".glb"
         target_path = dest_dir / f"model{raw_ext}"
@@ -52,6 +58,58 @@ class CadStagingRenderer:
             orig_path.chmod(0o644)
 
         return target_path
+
+    @classmethod
+    def stage_and_render_cad(
+        cls,
+        slot_dir: Path,
+        file_name: str,
+        file_bytes: bytes | None,
+        file_path: str | Path | None,
+        title: str,
+        resolved_slug: str,
+        agent: str,
+        category: str,
+        keep: bool,
+        base_domain: str,
+        lan_domain: str,
+        metadata: Any,
+    ) -> tuple[str, Path, str, int, dict[str, Any]]:
+        """Stage asset and render viewer HTML, returning (viewer_html, staged_file, format, size_bytes, meta_extra)."""
+        slot_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+        staged_file = cls.stage_binary_asset(
+            dest_dir=slot_dir, file_name=file_name, file_bytes=file_bytes, file_path=file_path
+        )
+        size_bytes = staged_file.stat().st_size
+        fmt = staged_file.suffix.lstrip(".").lower()
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+        rec = PreviewRecord(
+            id=resolved_slug,
+            title=title,
+            agent=agent or "Antigravity",
+            category=category or "CAD / 3D",
+            url=f"https://{base_domain}/{resolved_slug}/",
+            lan_url=f"http://{lan_domain}/{resolved_slug}/",
+            permanent=bool(keep),
+            created_at=now_iso,
+            updated_at=now_iso,
+        )
+        viewer_html = CadViewerRenderer.render_cad_viewer_html(
+            record=rec,
+            asset_filename=staged_file.name,
+            metadata=metadata if isinstance(metadata, CadMetadata) else None,
+        )
+        meta_extra: dict[str, Any] = {
+            "file_name": file_name,
+            "format": fmt,
+            "model_file": staged_file.name,
+        }
+        if metadata:
+            if hasattr(metadata, "model_dump"):
+                meta_extra["cad_metadata"] = metadata.model_dump()
+            elif isinstance(metadata, dict):
+                meta_extra["cad_metadata"] = metadata
+        return viewer_html, staged_file, fmt, size_bytes, meta_extra
 
     @classmethod
     def render_cad_viewer_html(
