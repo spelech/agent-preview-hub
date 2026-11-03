@@ -9,6 +9,7 @@ from pathlib import Path
 import uvicorn
 
 from .api import create_app
+from .cad_staging_renderer import CadStagingRenderer
 from .publication_service import DEFAULT_PREVIEWS_DIR, PreviewPublicationService
 
 
@@ -145,6 +146,18 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     p_port.add_argument("--description", default="", help="Short description")
     p_port.add_argument("--keep", action="store_true", help="Pin preview permanently")
 
+    # cad / 3d
+    p_cad = subparsers.add_parser(
+        "cad", aliases=["3d"], help="Publish a 3D model or CAD asset (.glb, .stl, .step, .3mf)"
+    )
+    p_cad.add_argument("file", help="Path to 3D CAD model file")
+    p_cad.add_argument("--slug", help="Optional short slug (auto-generated if omitted)")
+    p_cad.add_argument("--title", help="Human-readable title (defaults to filename)")
+    p_cad.add_argument("--agent", default="Antigravity", help="Agent or author name")
+    p_cad.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_cad.add_argument("--open", action="store_true", help="Open preview in browser immediately")
+    p_cad.add_argument("--json", action="store_true", help="Output full result as JSON")
+
     # list / delete / pin / unpin / prune / serve
     subparsers.add_parser("list", help="List all active previews")
 
@@ -240,6 +253,41 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             keep=args.keep,
         )
         _print_short_links(res["title"], res["lan_url"], res["url"], res["id"])
+    elif args.command in ("cad", "3d"):
+        file_path = Path(args.file).resolve()
+        if not file_path.exists():
+            sys.stderr.write(f"Error: CAD file not found: {args.file}\n")
+            return 1
+        if not CadStagingRenderer.is_cad_file(file_path):
+            sys.stderr.write(f"Error: Unsupported CAD file extension: {file_path.suffix}\n")
+            return 1
+        if file_path.stat().st_size == 0:
+            sys.stderr.write("Error: CAD file cannot be empty.\n")
+            return 1
+        title = args.title or file_path.name
+        res = service.publish_cad(
+            file_name=file_path.name,
+            file_path=file_path,
+            slug=args.slug,
+            title=title,
+            agent=args.agent,
+            keep=args.keep,
+        )
+        if args.json:
+            import json
+
+            print(json.dumps(res, indent=2))
+        else:
+            _print_short_links(
+                res.get("title", title),
+                res["lan_url"],
+                res.get("url") or res.get("remote_url", ""),
+                res["id"],
+            )
+        if args.open:
+            import webbrowser
+
+            webbrowser.open(res["lan_url"])
     elif args.command == "list":
         previews = service.list_previews()
         if not previews:
