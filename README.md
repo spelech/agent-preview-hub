@@ -7,12 +7,19 @@ Self-hosted interactive preview engine, Mermaid Studio, and Markdown/Diff viewer
 - **Single-Line Short URLs (`< 30` chars on LAN):** Generates deterministic 7-character slugs (`m-8f3a1`, `md-4c9e2`, `df-1a7b3`) served at `http://preview.lan/<slug>/` and `https://preview.wileyriley.com/<slug>/` so URLs never wrap or break in CLI terminals.
 - **Interactive Mermaid Studio:** Full-viewport pan/zoom canvas, split-pane live Mermaid code editor, dark/light theme toggle, SVG export, and a 1-click **Mermaid.Live ↗** button that keeps the 500-character `#pako:` link inside the browser UI instead of cluttering terminal output.
 - **Automatic Mermaid Syntax Sanitizer:** Automatically quotes edge labels containing special characters, converts literal `\n` sequences inside quoted node labels into `<br/>`, and escapes `<placeholder>` angle brackets so DOM parsers never fail.
+- **Interactive WebGL CAD & 3D Viewer:** Full Three.js interactive 3D viewer for `.glb`, `.gltf`, `.stl`, `.step`, and `.3mf` assets featuring turntable orbit controls, wireframe toggle, bounding box dimension extents, camera presets (ISO/Top/Front/Side), and dark-mode lighting under deterministic `cad-<5hex>` slugs.
 - **Rich Markdown, Tables & Diff Viewer:** Renders GitHub-Flavored Markdown tables, `[!NOTE]` / `[!WARNING]` alerts, unified syntax-highlighted diffs with `+added / -removed` counters, and embedded Mermaid diagrams.
 - **APIs First, MCP Later:** Built on FastAPI + SQLite WAL (`PreviewRegistryRepository`) with thin CLI (`agent-preview`, `mermaid-live`) and FastMCP (`PreviewMcpTools`) adapters.
 
 ## Quickstart
 
 ```bash
+# Publish a 3D CAD model or mesh (.glb, .stl, .step, .3mf)
+agent-preview cad ./enclosure.glb --title "ESP32 Enclosure"
+
+# Publish a 3D model and get structured JSON output
+agent-preview 3d ./bracket.stl --json
+
 # Publish a Mermaid diagram and print short single-line links
 mermaid-live -s 'flowchart LR; A["Step 1\nInit"] -->|Run (Fast)| B["/previews/<slug>"]'
 
@@ -25,6 +32,15 @@ git diff | agent-preview diff latest-diff - --title "Working Tree Diff"
 # Run the FastAPI Preview Hub API server
 agent-preview serve --host 0.0.0.0 --port 8033
 ```
+
+## Model Context Protocol (MCP) Tools
+
+When using with Claude Desktop, Cursor, or Antigravity via FastMCP:
+- `publish_cad_preview`: Publish a 3D CAD model (`.glb`, `.stl`, `.step`, `.3mf`) directly to the Preview Hub.
+- `publish_mermaid_diagram`: Sanitize and publish Mermaid diagrams.
+- `publish_markdown_doc`: Publish rich Markdown documentation.
+- `publish_code_diff`: Publish unified code diffs.
+- `list_active_previews`: List all active preview slots with URLs and metadata.
 
 ## Architecture & Living Documentation
 

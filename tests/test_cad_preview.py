@@ -284,3 +284,45 @@ def test_cli_cad_and_3d_subcommands(tmp_path: Path, capsys: pytest.CaptureFixtur
         ]
     )
     assert ret_bad == 1
+
+
+def test_cad_retention_and_pruning(tmp_path: Path):
+    """Verify retention service prunes expired unpinned CAD previews and cleans up staged binary assets."""
+    previews_dir = tmp_path / "previews"
+    svc = PreviewPublicationService(previews_dir=previews_dir)
+
+    # 1. Publish unpinned CAD preview
+    res_unpinned = svc.publish_cad(
+        file_name="bracket.stl",
+        file_bytes=b"solid bracket\nendsolid",
+        title="Temporary Bracket",
+        keep=False,
+    )
+    slug_unpinned = res_unpinned["id"]
+    slot_unpinned = previews_dir / slug_unpinned
+    assert (slot_unpinned / "model.stl").exists()
+    assert (slot_unpinned / "index.html").exists()
+
+    # 2. Publish pinned CAD preview
+    res_pinned = svc.publish_cad(
+        file_name="chassis.glb",
+        file_bytes=b"glTF binary",
+        title="Permanent Chassis",
+        keep=True,
+    )
+    slug_pinned = res_pinned["id"]
+    slot_pinned = previews_dir / slug_pinned
+    assert (slot_pinned / "model.glb").exists()
+
+    # 3. Prune all unpinned
+    pruned_count = svc.prune_previews(all_unpinned=True)
+    assert pruned_count == 1
+    assert not slot_unpinned.exists()
+    assert slot_pinned.exists()
+    assert (slot_pinned / "model.glb").exists()
+
+    # 4. Explicit delete of pinned preview
+    count_del, deleted = svc.delete_previews([slug_pinned])
+    assert count_del == 1
+    assert deleted == [slug_pinned]
+    assert not slot_pinned.exists()

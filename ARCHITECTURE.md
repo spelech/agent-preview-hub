@@ -16,16 +16,17 @@ flowchart TD
     end
 
     subgraph Core["agent-preview-hub Domain Engine"]
-        API["FastAPI Service<br/>/api/previews, /api/mermaid, /api/markdown, /api/diff"]
+        API["FastAPI Service<br/>/api/previews, /api/cad, /api/mermaid, /api/markdown, /api/diff"]
         SVC["PreviewPublicationService<br/>Short-Slug Generator & TTL Engine"]
         SAN["MermaidSanitizer<br/>Edge Quote & Angle-Bracket Escaper"]
-        RND["Renderers<br/>MermaidStudioRenderer & MarkdownDiffRenderer"]
+        RND["Renderers<br/>CadViewerRenderer, MermaidStudioRenderer, MarkdownDiffRenderer"]
+        STG["Staging Helpers<br/>CadStagingRenderer & FilePathPublisher"]
         TAP["DiagnosticTapRingBuffer<br/>Telemetry Ring Buffer"]
     end
 
     subgraph Storage["Persistence & Web Delivery"]
         DB[("SQLite WAL<br/>.preview_registry.db")]
-        FS["Caddy Static Root<br/>/var/www/previews/&lt;slug&gt;/index.html"]
+        FS["Caddy Static Root<br/>/var/www/previews/&lt;slug&gt;/(index.html, model.ext)"]
     end
 
     CLI --> SVC
@@ -33,6 +34,7 @@ flowchart TD
     API --> SVC
     SVC --> SAN
     SVC --> RND
+    SVC --> STG
     SVC --> DB
     SVC --> FS
     SVC --> TAP
@@ -46,32 +48,36 @@ flowchart TD
 sequenceDiagram
     autonumber
     participant Agent as AI Agent / Operator
-    participant CLI as mermaid-live / agent-preview
+    participant CLI as agent-preview / MCP / API
     participant Svc as PreviewPublicationService
-    participant San as MermaidSanitizer
+    participant Cad as CadStagingRenderer & CadViewerRenderer
     participant Repo as PreviewRegistryRepository
     participant Caddy as Caddy Web Server
 
-    Agent->>CLI: Pass Mermaid, Markdown, or Diff payload
-    CLI->>Svc: Invoke publish_mermaid / publish_markdown / publish_diff
-    Svc->>San: Sanitize syntax, escape <tags>, convert \n to <br/>
-    San-->>Svc: Return sanitized code + #pako: URL
-    Svc->>Svc: Generate 7-char deterministic slug (m-8f3a1)
-    Svc->>Repo: Write <slug>/index.html + sync SQLite WAL & previews.json
+    Agent->>CLI: Pass CAD model (.glb, .stl, .step, .3mf)
+    CLI->>Svc: Invoke publish_cad
+    Svc->>Cad: Stage binary asset + render Three.js WebGL viewer
+    Cad-->>Svc: Return staged model file + HTML template
+    Svc->>Svc: Generate 8-char deterministic slug (cad-8f3a1)
+    Svc->>Repo: Write <slug>/(index.html, model.ext) + sync SQLite WAL
     Repo-->>CLI: Return single-line LAN & HTTPS URLs (<35 chars)
-    Agent->>Caddy: Open http://preview.lan/m-8f3a1/
+    Agent->>Caddy: Open http://preview.lan/cad-8f3a1/
 ```
 
 ---
 
 ## Module Boundaries
 
-- **`models.py`**: Defines Pydantic v2 request schemas, `PreviewRecord`, and `AgentFeedbackEnvelope`.
+- **`models.py`**: Defines Pydantic v2 schemas (`CadPublishRequest`, `CadMetadata`), `PreviewRecord`, and `AgentFeedbackEnvelope`.
+- **`cad_staging_renderer.py`**: Validates CAD formats (`.glb`, `.stl`, `.step`, `.stp`, `.3mf`), safely stages binary assets, and coordinates rendering.
+- **`cad_viewer_renderer.py`**: Generates full Three.js WebGL interactive viewer HTML with turntable orbit controls, wireframe toggle, camera presets, and bounding box extents.
 - **`database.py`**: Implements `PreviewRegistryRepository` using SQLite in `WAL` mode synchronized with `previews.json`.
+- **`slug_generator.py`**: Generates collision-checked deterministic short slugs (`m-<5hex>`, `cad-<5hex>`, `md-<5hex>`, `df-<5hex>`).
+- **`file_path_publisher.py`**: Stages file system paths, directories, and assets with media wrappers.
 - **`mermaid_sanitizer.py`**: Quotes edge labels, converts literal `\n` inside node labels to `<br/>`, and escapes `<placeholder>` tags.
 - **`mermaid_studio_renderer.py`**: Renders an interactive pan-and-zoom SVG canvas and split-pane live code editor using `mermaid.render()`.
 - **`markdown_diff_renderer.py`**: Renders GitHub-Flavored Markdown, tables, alerts, unified diffs, and embedded Mermaid diagrams.
-- **`publication_service.py`**: Generates deterministic short slugs (`m-<5hex>`) so terminal URLs never wrap across lines.
-- **`api.py`**: Exposes FastAPI HTTP endpoints for preview management and health probes.
-- **`mcp_server.py`**: Wraps `PreviewPublicationService` for Model Context Protocol clients.
-- **`cli.py`**: Provides the `agent-preview` and `mermaid-live` CLI commands.
+- **`publication_service.py`**: Orchestrates preview lifecycle, storage, and retention under `< 500 LOC`.
+- **`api.py`**: Exposes FastAPI HTTP endpoints for multipart CAD uploads (`/api/cad/upload`), JSON payloads, preview management, and health probes.
+- **`mcp_server.py`**: Wraps `PreviewPublicationService` with FastMCP tools including `publish_cad_preview`.
+- **`cli.py`**: Provides the `agent-preview` (`cad`, `publish`, `text`, `mermaid`, `md`, `diff`, `port`) and `mermaid-live` commands.
