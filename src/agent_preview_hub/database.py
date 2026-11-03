@@ -137,9 +137,7 @@ class PreviewRegistryRepository:
     def list_records(self) -> list[PreviewRecord]:
         """Return all preview records ordered by updated_at descending."""
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM previews ORDER BY updated_at DESC;"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM previews ORDER BY updated_at DESC;").fetchall()
             return [self._row_to_record(r) for r in rows]
 
     @staticmethod
@@ -194,18 +192,22 @@ class PreviewRegistryRepository:
                     entrypoint = "index.html"
                 else:
                     files = [
-                        f.name
-                        for f in item.iterdir()
-                        if f.is_file() and not f.name.startswith(".")
+                        f.name for f in item.iterdir() if f.is_file() and not f.name.startswith(".")
                     ]
                     entrypoint = files[0] if files else "index.html"
 
-            created_at = meta.get("created_at") or datetime.datetime.fromtimestamp(
-                item.stat().st_ctime, tz=datetime.UTC
-            ).isoformat()
-            updated_at = meta.get("updated_at") or datetime.datetime.fromtimestamp(
-                item.stat().st_mtime, tz=datetime.UTC
-            ).isoformat()
+            created_at = (
+                meta.get("created_at")
+                or datetime.datetime.fromtimestamp(
+                    item.stat().st_ctime, tz=datetime.UTC
+                ).isoformat()
+            )
+            updated_at = (
+                meta.get("updated_at")
+                or datetime.datetime.fromtimestamp(
+                    item.stat().st_mtime, tz=datetime.UTC
+                ).isoformat()
+            )
 
             target_port = meta.get("target_port")
             try:

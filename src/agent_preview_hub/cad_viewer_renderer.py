@@ -28,7 +28,7 @@ class CadViewerRenderer:
         escaped_asset = html.escape(asset_filename, quote=True)
 
         ext = asset_filename.rsplit(".", 1)[-1].lower() if "." in asset_filename else "glb"
-        tag = (metadata.format.upper() if (metadata and metadata.format) else ext.upper())
+        tag = metadata.format.upper() if (metadata and metadata.format) else ext.upper()
 
         meta_dict = metadata.model_dump() if metadata else {}
         meta_json = json.dumps(meta_dict)
@@ -126,6 +126,7 @@ class CadViewerRenderer:
       <h1 data-testid="model-title">{escaped_title}</h1>
       <span class="agent-pill" data-testid="agent-attribution">by {escaped_agent}</span>
       <span class="tag-pill" data-testid="file-format-tag">{tag}</span>
+      <span class="tag-pill" data-testid="cad-badge" style="background:#0284c7;color:#fff;">CAD / 3D Preview</span>
     </div>
     <div class="toolbar">
       <button class="btn" id="btn-theme" data-testid="btn-theme" title="Toggle Dark/Light Mode">&#9788; Theme</button>

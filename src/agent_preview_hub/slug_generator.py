@@ -30,7 +30,7 @@ class SlugGenerator:
         base_hash = hashlib.sha256(raw_bytes).hexdigest()
         salt_idx = 0
         while True:
-            slug = f"{prefix}-{base_hash[salt_idx:salt_idx+5]}"
+            slug = f"{prefix}-{base_hash[salt_idx : salt_idx + 5]}"
             slot_dir = previews_dir / clean_slug_fn(slug)
             if not slot_dir.exists():
                 return slug
@@ -44,5 +44,5 @@ class SlugGenerator:
                     pass
             salt_idx += 1
             if salt_idx + 5 > len(base_hash):
-                base_hash = hashlib.sha256(f"{base_hash}-{salt_idx}".encode("utf-8")).hexdigest()
+                base_hash = hashlib.sha256(f"{base_hash}-{salt_idx}".encode()).hexdigest()
                 salt_idx = 0

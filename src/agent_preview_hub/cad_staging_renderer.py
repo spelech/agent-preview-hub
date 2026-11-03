@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
+from typing import ClassVar
 
 
 class CadStagingRenderer:
     """Provides file staging utilities and HTML viewer generation for CAD and 3D assets."""
 
-    SUPPORTED_EXTENSIONS = {".glb", ".gltf", ".stl", ".step", ".stp", ".3mf"}
+    SUPPORTED_EXTENSIONS: ClassVar[set[str]] = {".glb", ".gltf", ".stl", ".step", ".stp", ".3mf"}
 
     @classmethod
     def is_cad_file(cls, filename_or_path: str | Path) -> bool:
@@ -42,6 +43,14 @@ class CadStagingRenderer:
 
         # Ensure safe read permissions (0o644)
         target_path.chmod(0o644)
+
+        # Also preserve original file name if different from model.<ext>
+        orig_name = Path(file_name).name
+        if orig_name and orig_name != target_path.name:
+            orig_path = dest_dir / orig_name
+            orig_path.write_bytes(target_path.read_bytes())
+            orig_path.chmod(0o644)
+
         return target_path
 
     @classmethod

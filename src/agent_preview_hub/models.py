@@ -83,12 +83,18 @@ class CadMetadata(BaseModel):
     unit: str = Field(default="mm", description="Measurement unit (e.g. mm, cm, in)")
     vertex_count: int | None = Field(default=None, ge=0, description="Total vertex count")
     face_count: int | None = Field(default=None, ge=0, description="Total triangle/face count")
-    format: str | None = Field(default=None, description="Model format tag (glb, gltf, stl, step, 3mf)")
-    size_bytes: int | None = Field(default=None, ge=0, description="Size of binary model file in bytes")
+    format: str | None = Field(
+        default=None, description="Model format tag (glb, gltf, stl, step, 3mf)"
+    )
+    size_bytes: int | None = Field(
+        default=None, ge=0, description="Size of binary model file in bytes"
+    )
     dimensions_mm: tuple[float, float, float] | None = Field(
         default=None, description="Bounding box X, Y, Z extents in millimeters"
     )
-    attributes: dict[str, Any] = Field(default_factory=dict, description="Custom metadata attributes")
+    attributes: dict[str, Any] = Field(
+        default_factory=dict, description="Custom metadata attributes"
+    )
 
 
 class CadPublishRequest(BaseModel):
