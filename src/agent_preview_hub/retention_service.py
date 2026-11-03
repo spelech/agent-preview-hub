@@ -95,9 +95,7 @@ class PreviewRetentionService:
             now = datetime.datetime.now(datetime.UTC)
             meta["permanent"] = bool(permanent)
             meta["expires_at"] = (
-                None
-                if permanent
-                else (now + datetime.timedelta(days=DEFAULT_TTL_DAYS)).isoformat()
+                None if permanent else (now + datetime.timedelta(days=DEFAULT_TTL_DAYS)).isoformat()
             )
             meta["updated_at"] = now.isoformat()
             meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")

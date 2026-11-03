@@ -12,9 +12,7 @@ class PreviewMcpTools:
     """Thin adapter exposing PreviewPublicationService operations as MCP-callable tools."""
 
     def __init__(self, previews_dir: Path | None = None) -> None:
-        self._service = PreviewPublicationService(
-            previews_dir=previews_dir or DEFAULT_PREVIEWS_DIR
-        )
+        self._service = PreviewPublicationService(previews_dir=previews_dir or DEFAULT_PREVIEWS_DIR)
 
     def publish_mermaid_diagram(
         self,

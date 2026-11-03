@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from .models import (
     BatchDeleteRequest,
+    CadPublishRequest,
     DiffPublishRequest,
     MarkdownPublishRequest,
     MermaidPublishRequest,
@@ -82,6 +83,25 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
             )
             return {"status": "ok", **res}
         except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cad")
+    @app.post("/cad")
+    async def publish_cad_endpoint(req: CadPublishRequest) -> dict[str, Any]:
+        try:
+            res = service.publish_cad(
+                file_name=req.file_name,
+                file_bytes=req.file_bytes,
+                file_path=req.file_path,
+                slug=req.slug,
+                title=req.title,
+                agent=req.agent,
+                keep=req.keep,
+                category=req.category,
+                metadata=req.metadata,
+            )
+            return {"status": "ok", **res}
+        except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/markdown")

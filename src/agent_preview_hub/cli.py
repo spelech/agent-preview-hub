@@ -26,9 +26,17 @@ def main_mermaid_live(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("file", nargs="?", help="Path to file containing Mermaid code (or stdin).")
     parser.add_argument("-s", "--string", help="Mermaid code string directly on CLI.")
-    parser.add_argument("--theme", default="dark", choices=["default", "neutral", "dark", "forest", "base"])
-    parser.add_argument("--shorten", action="store_true", help="Also shorten #pako: URL via da.gd/TinyURL.")
-    parser.add_argument("--preview", metavar="SLUG", help="Custom slug for Agent Preview Hub (default: auto short hash m-<5hex>).")
+    parser.add_argument(
+        "--theme", default="dark", choices=["default", "neutral", "dark", "forest", "base"]
+    )
+    parser.add_argument(
+        "--shorten", action="store_true", help="Also shorten #pako: URL via da.gd/TinyURL."
+    )
+    parser.add_argument(
+        "--preview",
+        metavar="SLUG",
+        help="Custom slug for Agent Preview Hub (default: auto short hash m-<5hex>).",
+    )
     parser.add_argument("--title", default="Mermaid Diagram", help="Diagram title.")
     parser.add_argument("--url-only", action="store_true", help="Print only the short preview URL.")
     parser.add_argument("--json", action="store_true", help="Output full result as JSON.")
@@ -62,6 +70,7 @@ def main_mermaid_live(argv: list[str] | None = None) -> int:
 
     if args.json:
         import json
+
         print(json.dumps(result, indent=2))
     elif args.url_only:
         print(result["lan_url"])
@@ -77,7 +86,9 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # publish
-    p_pub = subparsers.add_parser("publish", help="Publish a directory, file, image, Markdown, diff, or Mermaid file")
+    p_pub = subparsers.add_parser(
+        "publish", help="Publish a directory, file, image, Markdown, diff, or Mermaid file"
+    )
     p_pub.add_argument("id", help="Unique preview slug/ID")
     p_pub.add_argument("source", help="Source folder or file path")
     p_pub.add_argument("--title", help="Human-readable title")
@@ -108,14 +119,18 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     # md / markdown
     p_md = subparsers.add_parser("md", help="Publish rich GitHub-Flavored Markdown & tables")
     p_md.add_argument("id", help="Unique preview slug/ID")
-    p_md.add_argument("content", nargs="?", default="-", help="Markdown file path, inline text, or '-' for stdin")
+    p_md.add_argument(
+        "content", nargs="?", default="-", help="Markdown file path, inline text, or '-' for stdin"
+    )
     p_md.add_argument("--title", default="Markdown Preview", help="Document title")
     p_md.add_argument("--keep", action="store_true", help="Pin preview permanently")
 
     # diff
     p_diff = subparsers.add_parser("diff", help="Publish syntax-highlighted unified diff")
     p_diff.add_argument("id", help="Unique preview slug/ID")
-    p_diff.add_argument("content", nargs="?", default="-", help="Diff file path, inline diff, or '-' for stdin")
+    p_diff.add_argument(
+        "content", nargs="?", default="-", help="Diff file path, inline diff, or '-' for stdin"
+    )
     p_diff.add_argument("--title", default="Code Diff Preview", help="Diff title")
     p_diff.add_argument("--keep", action="store_true", help="Pin preview permanently")
 
@@ -168,7 +183,12 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             description=args.description,
             keep=args.keep,
         )
-        _print_short_links(res.get("title", args.id), res["lan_url"], res.get("url") or res.get("remote_url", ""), res["id"])
+        _print_short_links(
+            res.get("title", args.id),
+            res["lan_url"],
+            res.get("url") or res.get("remote_url", ""),
+            res["id"],
+        )
     elif args.command == "text":
         content = sys.stdin.read() if args.content == "-" else args.content
         tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else None
@@ -194,7 +214,9 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             raw = Path(args.content).read_text(encoding="utf-8")
         else:
             raw = args.content
-        res = service.publish_markdown(markdown_text=raw, slug=args.id, title=args.title, keep=args.keep)
+        res = service.publish_markdown(
+            markdown_text=raw, slug=args.id, title=args.title, keep=args.keep
+        )
         _print_short_links(res["title"], res["lan_url"], res["url"], res["id"])
     elif args.command == "diff":
         if args.content == "-":

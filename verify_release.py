@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
 
@@ -17,8 +17,8 @@ def main() -> int:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     init_py = (ROOT / "src" / "agent_preview_hub" / "__init__.py").read_text(encoding="utf-8")
 
-    m_toml = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
-    m_init = re.search(r'^__version__\s*=\s*"([^"]+)"', init_py, re.M)
+    m_toml = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+    m_init = re.search(r'^__version__\s*=\s*"([^"]+)"', init_py, re.MULTILINE)
     if not m_toml or not m_init or m_toml.group(1) != m_init.group(1):
         errors.append("Version mismatch between pyproject.toml and __init__.py")
 
@@ -35,14 +35,18 @@ def main() -> int:
     for test_file in (ROOT / "tests").rglob("test_*.py"):
         content = test_file.read_text(encoding="utf-8")
         if "unittest.mock" in content or "@patch(" in content:
-            errors.append(f"Anti-Test-Theatre violation in {test_file.name}: unittest.mock is prohibited")
+            errors.append(
+                f"Anti-Test-Theatre violation in {test_file.name}: unittest.mock is prohibited"
+            )
 
     if errors:
         for err in errors:
             sys.stderr.write(f"❌ {err}\n")
         return 1
 
-    print("✅ Gate 1 passed: SemVer synced, all modules <= 500 LOC, zero Anti-Test-Theatre violations.")
+    print(
+        "✅ Gate 1 passed: SemVer synced, all modules <= 500 LOC, zero Anti-Test-Theatre violations."
+    )
     return 0
 
 

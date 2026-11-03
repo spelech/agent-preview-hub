@@ -10,9 +10,26 @@ import urllib.request
 import zlib
 from typing import Any
 
-_EDGE_LABEL_PATTERN = re.compile(r'(--+>|-\.+->|==+>|--+|==+)\s*\|([^|\n\r]+)\|')
+_EDGE_LABEL_PATTERN = re.compile(r"(--+>|-\.+->|==+>|--+|==+)\s*\|([^|\n\r]+)\|")
 _QUOTED_LABEL_PATTERN = re.compile(r'"([^"\n\r]*)"')
-_ALLOWED_HTML_TAGS = {"br", "br/", "b", "/b", "i", "/i", "strong", "/strong", "em", "/em", "code", "/code", "sub", "/sub", "sup", "/sup"}
+_ALLOWED_HTML_TAGS = {
+    "br",
+    "br/",
+    "b",
+    "/b",
+    "i",
+    "/i",
+    "strong",
+    "/strong",
+    "em",
+    "/em",
+    "code",
+    "/code",
+    "sub",
+    "/sub",
+    "sup",
+    "/sup",
+}
 _ANGLE_TAG_PATTERN = re.compile(r"<(/?[A-Za-z0-9_:-]+(?:\s[^<>]*)?/?)>")
 
 
@@ -52,6 +69,7 @@ def sanitize_mermaid_code(code: str) -> str:
 
     sanitized_lines = []
     for line in raw.splitlines():
+
         def quote_edge_label(match: re.Match[str]) -> str:
             arrow = match.group(1)
             label = match.group(2).strip()

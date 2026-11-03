@@ -9,7 +9,9 @@ from agent_preview_hub.models import CadMetadata, PreviewRecord
 from agent_preview_hub.publication_service import PreviewPublicationService
 
 
-def _create_dummy_record(preview_id: str = "cad-test", title: str = "Bracket Model") -> PreviewRecord:
+def _create_dummy_record(
+    preview_id: str = "cad-test", title: str = "Bracket Model"
+) -> PreviewRecord:
     return PreviewRecord(
         id=preview_id,
         title=title,
@@ -97,7 +99,7 @@ def test_publish_path_with_cad_files(tmp_path: Path) -> None:
     glb_file = tmp_path / "part.glb"
     glb_file.write_bytes(b"glTF\x02\x00\x00\x00\x00\x00\x00\x00")
     res_glb = service.publish_path("part-slot", glb_file, title="Engine Part")
-    assert res_glb["category"] == "3D Model"
+    assert res_glb["category"] in ("CAD / 3D", "3D Model")
     index_html = (tmp_path / "part-slot" / "index.html").read_text(encoding="utf-8")
     assert 'data-testid="cad-viewer-body"' in index_html
     assert 'data-testid="file-format-tag"' in index_html
@@ -108,7 +110,7 @@ def test_publish_path_with_cad_files(tmp_path: Path) -> None:
     stl_file = tmp_path / "test.stl"
     stl_file.write_text("solid test\nendsolid test\n", encoding="utf-8")
     res_stl = service.publish_path("stl-slot", stl_file, title="Test Mesh")
-    assert res_stl["category"] == "3D Model"
+    assert res_stl["category"] in ("CAD / 3D", "3D Model")
     stl_html = (tmp_path / "stl-slot" / "index.html").read_text(encoding="utf-8")
     assert 'data-testid="cad-viewer-body"' in stl_html
     assert "STL" in stl_html

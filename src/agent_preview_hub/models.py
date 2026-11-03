@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PreviewRecord(BaseModel):
@@ -83,8 +83,38 @@ class CadMetadata(BaseModel):
     unit: str = Field(default="mm", description="Measurement unit (e.g. mm, cm, in)")
     vertex_count: int | None = Field(default=None, ge=0, description="Total vertex count")
     face_count: int | None = Field(default=None, ge=0, description="Total triangle/face count")
-    format: str | None = Field(default=None, description="Model format tag (glb, gltf, stl)")
-    attributes: dict[str, Any] = Field(default_factory=dict, description="Custom metadata attributes")
+    format: str | None = Field(
+        default=None, description="Model format tag (glb, gltf, stl, step, 3mf)"
+    )
+    size_bytes: int | None = Field(
+        default=None, ge=0, description="Size of binary model file in bytes"
+    )
+    dimensions_mm: tuple[float, float, float] | None = Field(
+        default=None, description="Bounding box X, Y, Z extents in millimeters"
+    )
+    attributes: dict[str, Any] = Field(
+        default_factory=dict, description="Custom metadata attributes"
+    )
+
+
+class CadPublishRequest(BaseModel):
+    """Request payload to stage binary asset and publish a CAD/3D model preview."""
+
+    file_name: str = Field(..., min_length=1, description="Model file name with extension")
+    file_bytes: bytes | None = Field(default=None, description="Raw binary content of model")
+    file_path: str | None = Field(default=None, description="Path to model file on disk")
+    slug: str | None = Field(default=None, description="Optional custom short slug")
+    title: str = Field(default="CAD Model Preview", description="Model preview title")
+    agent: str = Field(default="Antigravity", description="Authoring agent or operator")
+    keep: bool = Field(default=False, description="Pin preview permanently")
+    category: str = Field(default="CAD / 3D", description="Preview category")
+    metadata: CadMetadata | None = Field(default=None, description="Optional CAD model metadata")
+
+    @model_validator(mode="after")
+    def check_file_source(self) -> CadPublishRequest:
+        if self.file_bytes is None and not self.file_path:
+            raise ValueError("Either 'file_bytes' or 'file_path' must be provided.")
+        return self
 
 
 class AgentFeedbackEnvelope(BaseModel):

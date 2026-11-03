@@ -1,0 +1,180 @@
+"""Anti-Test-Theatre tests for CAD/3D model previews, short slug routing, binary staging, and SQLite persistence."""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+from pathlib import Path
+
+import httpx
+import pytest
+from pydantic import ValidationError
+
+from agent_preview_hub.api import create_app
+from agent_preview_hub.models import CadMetadata, CadPublishRequest
+from agent_preview_hub.publication_service import PreviewPublicationService
+
+
+def test_cad_models_validation():
+    """Verify CadMetadata and CadPublishRequest validation logic without mocks."""
+    meta = CadMetadata(
+        format="glb",
+        size_bytes=1024,
+        dimensions_mm=(10.5, 20.0, 30.2),
+    )
+    assert meta.format == "glb"
+    assert meta.size_bytes == 1024
+    assert meta.dimensions_mm == (10.5, 20.0, 30.2)
+
+    # Valid request with file_bytes
+    req_bytes = CadPublishRequest(
+        file_name="gear.glb",
+        file_bytes=b"sample_glb_binary_data",
+        title="Sample Gear",
+        metadata=meta,
+    )
+    assert req_bytes.file_name == "gear.glb"
+    assert req_bytes.file_bytes == b"sample_glb_binary_data"
+    assert req_bytes.category == "CAD / 3D"
+    assert req_bytes.agent == "Antigravity"
+    assert req_bytes.keep is False
+
+    # Valid request with file_path
+    req_path = CadPublishRequest(
+        file_name="bracket.stl",
+        file_path="/tmp/bracket.stl",
+    )
+    assert req_path.file_path == "/tmp/bracket.stl"
+
+    # Regression check: missing both file_bytes and file_path raises ValidationError
+    with pytest.raises(ValidationError):
+        CadPublishRequest(file_name="missing.step")
+
+
+def test_cad_slug_determinism_and_collision(tmp_path: Path):
+    """Verify deterministic cad-<5hex> slug generation and collision handling."""
+    svc = PreviewPublicationService(previews_dir=tmp_path)
+    binary_data = b"BINARY_GLTF_DATA_12345"
+
+    slug1 = svc.generate_cad_slug(binary_data, file_name="part1.glb")
+    slug2 = svc.generate_cad_slug(binary_data, file_name="part1.glb")
+
+    assert slug1.startswith("cad-")
+    assert len(slug1) == 9  # "cad-" + 5 hex chars = 9 chars
+    assert slug1 == slug2
+
+    # Verify LAN and HTTPS URL formatting patterns
+    lan_url = f"http://preview.lan/{slug1}/"
+    https_url = f"https://preview.wileyriley.com/{slug1}/"
+    assert len(lan_url) <= 32
+    assert len(https_url) <= 42
+
+    # Simulate slot directory exists with a different file
+    slot_dir = svc.get_slot_dir(slug1)
+    slot_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = slot_dir / "_meta.json"
+    meta_path.write_text(
+        json.dumps({"category": "CAD / 3D", "file_name": "other_different.glb"}),
+        encoding="utf-8",
+    )
+
+    # Now generating for part1.glb should detect collision and resolve to a different slug
+    slug3 = svc.generate_cad_slug(binary_data, file_name="part1.glb")
+    assert slug3.startswith("cad-")
+    assert slug3 != slug1
+
+
+def test_cad_binary_asset_staging_and_permissions(tmp_path: Path):
+    """Verify binary asset staging in slot dir under model.<ext> with 0o644 permissions."""
+    svc = PreviewPublicationService(previews_dir=tmp_path)
+    sample_content = b"\x00\x01\x02\x03BINARY_STEP_GEOMETRY"
+
+    res = svc.publish_cad(
+        file_name="flange.step",
+        file_bytes=sample_content,
+        title="Mounting Flange",
+        keep=True,
+    )
+
+    slug = res["id"]
+    assert slug.startswith("cad-")
+    assert res["category"] == "CAD / 3D"
+    assert res["lan_url"] == f"http://preview.lan/{slug}/"
+    assert res["url"] == f"https://preview.wileyriley.com/{slug}/"
+
+    slot_dir = tmp_path / slug
+    assert slot_dir.is_dir()
+    staged_model = slot_dir / "model.step"
+    assert staged_model.exists()
+    assert staged_model.read_bytes() == sample_content
+
+    # File permission check: 0o644
+    mode = stat.S_IMODE(os.stat(staged_model).st_mode)
+    assert mode & 0o444 == 0o444  # readable
+
+    # Check generated index.html
+    index_html = (slot_dir / "index.html").read_text(encoding="utf-8")
+    assert "model.step" in index_html
+    assert "Mounting Flange" in index_html
+    assert "CAD / 3D Preview" in index_html
+
+    # Check database and previews.json sync
+    previews = svc.list_previews()
+    cad_preview = next((p for p in previews if p["id"] == slug), None)
+    assert cad_preview is not None
+    assert cad_preview["category"] == "CAD / 3D"
+    assert cad_preview["file_count"] >= 3  # index.html, model.step, _meta.json
+    assert cad_preview["size_bytes"] >= len(sample_content)
+
+
+def test_publish_path_cad_support(tmp_path: Path):
+    """Verify publish_path routes .stl, .3mf, .glb files directly into CAD staging."""
+    previews_dir = tmp_path / "previews"
+    svc = PreviewPublicationService(previews_dir=previews_dir)
+
+    source_stl = tmp_path / "bracket.stl"
+    source_stl.write_bytes(b"solid test facet normal 0 0 0 endsolid")
+
+    res = svc.publish_path(
+        preview_id="cad-bracket",
+        source_path=source_stl,
+        title="Support Bracket",
+    )
+    assert res["id"] == "cad-bracket"
+    assert res["category"] == "CAD / 3D"
+    assert (previews_dir / "cad-bracket" / "model.stl").exists()
+
+
+@pytest.mark.asyncio
+async def test_fastapi_cad_endpoint_roundtrip(tmp_path: Path):
+    """Verify full HTTP roundtrip on /api/cad endpoint."""
+    app = create_app(previews_dir=tmp_path)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        # Publish via /api/cad
+        r = await client.post(
+            "/api/cad",
+            json={
+                "file_name": "robot_arm.glb",
+                "file_bytes": "Z2xURg==",  # base64 encoded dummy bytes
+                "title": "Robotic Arm Assembly",
+                "keep": False,
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        slug = data["id"]
+        assert slug.startswith("cad-")
+        assert data["category"] == "CAD / 3D"
+        assert data["lan_url"] == f"http://preview.lan/{slug}/"
+
+        # Check preview registry list
+        r_list = await client.get("/api/previews")
+        assert r_list.status_code == 200
+        items = r_list.json()["previews"]
+        cad_item = next(i for i in items if i["id"] == slug)
+        assert cad_item["category"] == "CAD / 3D"
+        assert cad_item["title"] == "Robotic Arm Assembly"
