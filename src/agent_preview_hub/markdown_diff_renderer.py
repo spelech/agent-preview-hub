@@ -246,6 +246,135 @@ class MarkdownDiffRenderer:
 </html>"""
 
     @staticmethod
+    def render_cad_viewer_html(title: str, target_filename: str, file_ext: str) -> str:
+        """Render self-hosted interactive 3D CAD model viewer (.glb, .stl, .step, .3mf)."""
+        escaped_title = html.escape(title or target_filename)
+        escaped_file = html.escape(target_filename, quote=True)
+        ext = file_ext.lower().lstrip(".")
+
+        if ext == "glb":
+            viewer_component = f"""
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+    <model-viewer
+      src="./{escaped_file}"
+      alt="{escaped_title}"
+      auto-rotate
+      camera-controls
+      shadow-intensity="1"
+      style="width: 100%; height: 75vh; background-color: #0b0f19; border-radius: 12px;"
+    >
+      <div slot="poster" style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;">
+        Loading 3D Model...
+      </div>
+    </model-viewer>"""
+        else:
+            viewer_component = f"""
+    <div id="cad-canvas-container" style="width:100%;height:75vh;background:#0b0f19;border-radius:12px;position:relative;display:flex;align-items:center;justify-content:center;">
+      <div style="text-align:center;padding:24px;color:#94a3b8;">
+        <p style="font-size:18px;font-weight:600;color:#f8fafc;margin-bottom:8px;">{escaped_title}</p>
+        <p style="font-size:13px;margin-bottom:16px;">3D CAD File Format: <span style="color:#38bdf8;text-transform:uppercase;font-weight:600;">.{ext}</span></p>
+        <p style="font-size:12px;color:#64748b;max-width:400px;margin:0 auto 20px;">Use the download button below to inspect this model in your local CAD software or slicer (FreeCAD, Bambu Studio, PrusaSlicer, Onshape).</p>
+      </div>
+    </div>"""
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{escaped_title} - CAD Preview</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --card: #111827;
+      --border: #1f2937;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+    }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+    }}
+    header {{
+      padding: 14px 24px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .hub-link {{
+      color: var(--muted);
+      text-decoration: none;
+      margin-right: 12px;
+      font-size: 13px;
+    }}
+    .tag {{
+      font-size: 11px;
+      padding: 3px 8px;
+      background: #1e293b;
+      color: var(--accent);
+      border-radius: 9999px;
+      font-family: monospace;
+      font-weight: 600;
+    }}
+    .wrap {{
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }}
+    .viewer-card {{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }}
+    .footer-bar {{
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .download-btn {{
+      padding: 8px 16px;
+      background: #2563eb;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background 0.15s ease;
+    }}
+    .download-btn:hover {{
+      background: #1d4ed8;
+    }}
+  </style>
+</head>
+<body data-testid="cad-viewer-body">
+  <header>
+    <div>
+      <a href="/" class="hub-link">&larr; Hub Directory</a>
+      <strong style="color:#f8fafc;">{escaped_title}</strong>
+    </div>
+    <span class="tag">CAD MODEL (.{ext.upper()})</span>
+  </header>
+  <main class="wrap">
+    <div class="viewer-card">
+      {viewer_component}
+      <div class="footer-bar">
+        <span style="font-size:12px;color:var(--muted);font-family:monospace;">File: {escaped_file}</span>
+        <a href="./{escaped_file}" target="_blank" download class="download-btn">Download CAD Model (.{ext.upper()})</a>
+      </div>
+    </div>
+  </main>
+</body>
+</html>"""
+
+    @staticmethod
     def render_media_wrapper_html(title: str, target_filename: str, file_type: str) -> str:
         """Render interactive zoomable image or embedded document viewer."""
         escaped_title = html.escape(title or target_filename)

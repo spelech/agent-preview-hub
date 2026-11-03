@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import datetime
+import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 from .markdown_diff_renderer import MarkdownDiffRenderer
 
@@ -55,3 +58,34 @@ class FilePathPublisher:
                 (slot_dir / "index.html").write_text(wrapper, encoding="utf-8")
 
         return resolved_category, entrypoint
+
+    @staticmethod
+    def write_path_metadata(
+        slot_dir: Path,
+        resolved_title: str,
+        resolved_category: str,
+        entrypoint: str,
+        agent: str,
+        tags: list[str] | None,
+        description: str,
+        keep: bool,
+        ttl_days: int,
+    ) -> tuple[dict[str, Any], str | None]:
+        """Write _meta.json and return metadata dict with expiration timestamp."""
+        now = datetime.datetime.now(datetime.UTC)
+        expires_at = None if keep else (now + datetime.timedelta(days=ttl_days)).isoformat()
+        meta: dict[str, Any] = {
+            "id": slot_dir.name,
+            "title": resolved_title,
+            "agent": agent or "Antigravity",
+            "category": resolved_category,
+            "tags": tags or [resolved_category],
+            "description": description,
+            "entrypoint": entrypoint,
+            "permanent": bool(keep),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "expires_at": expires_at,
+        }
+        (slot_dir / "_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return meta, expires_at
