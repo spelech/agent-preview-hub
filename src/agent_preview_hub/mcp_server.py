@@ -5,10 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastmcp import FastMCP
-
 from .models import AgentFeedbackEnvelope
 from .publication_service import DEFAULT_PREVIEWS_DIR, PreviewPublicationService
+
+try:
+    from fastmcp import FastMCP
+except ImportError:  # pragma: no cover
+    class FastMCP:  # type: ignore[no-redef]
+        """Fallback mock for environments without fastmcp installed."""
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self._tools: dict[str, Any] = {}
+
+        def tool(self, *args: Any, **kwargs: Any) -> Any:
+            def decorator(fn: Any) -> Any:
+                self._tools[fn.__name__] = fn
+                return fn
+            return decorator
 
 mcp = FastMCP("agent-preview-hub")
 _default_service: PreviewPublicationService | None = None
