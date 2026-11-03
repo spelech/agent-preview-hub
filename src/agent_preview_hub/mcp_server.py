@@ -64,7 +64,7 @@ def publish_cad_preview(
             "file_count": res["file_count"],
             "size_bytes": res["size_bytes"],
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         previews_dir_str = (
             str(_default_service.previews_dir)
             if _default_service is not None
@@ -178,7 +178,7 @@ class PreviewMcpTools:
                 "file_count": res["file_count"],
                 "size_bytes": res["size_bytes"],
             }
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             envelope = AgentFeedbackEnvelope(
                 inputs=inputs,
                 assumptions=[
