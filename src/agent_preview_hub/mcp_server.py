@@ -151,6 +151,24 @@ def publish_code_diff(
 
 
 @mcp.tool()
+def share_preview_public(preview_id: str, slug: str | None = None) -> dict[str, Any]:
+    """Create or refresh an unauthenticated `/s/<token>/` share link for an existing preview slot."""
+    ok, data = get_publication_service().share_preview(preview_id=preview_id, slug=slug)
+    if not ok:
+        return {"status": "error", "error": f"Preview '{preview_id}' not found"}
+    return {"status": "ok", **data}
+
+
+@mcp.tool()
+def unshare_preview_public(preview_id: str) -> dict[str, Any]:
+    """Revoke an unauthenticated `/s/<token>/` share link for a preview slot."""
+    ok, meta = get_publication_service().unshare_preview(preview_id=preview_id)
+    if not ok:
+        return {"status": "error", "error": f"Preview '{preview_id}' not found"}
+    return {"status": "ok", "preview": meta}
+
+
+@mcp.tool()
 def list_active_previews() -> list[dict[str, Any]]:
     """Return all active preview slots in the Preview Hub."""
     return get_publication_service().list_previews()
@@ -254,6 +272,20 @@ class PreviewMcpTools:
             title=title,
             keep=keep,
         )
+
+    def share_preview_public(self, preview_id: str, slug: str | None = None) -> dict[str, Any]:
+        """Create or refresh an unauthenticated `/s/<token>/` share link for a preview slot."""
+        ok, data = self._service.share_preview(preview_id=preview_id, slug=slug)
+        if not ok:
+            return {"status": "error", "error": f"Preview '{preview_id}' not found"}
+        return {"status": "ok", **data}
+
+    def unshare_preview_public(self, preview_id: str) -> dict[str, Any]:
+        """Revoke an unauthenticated `/s/<token>/` share link for a preview slot."""
+        ok, meta = self._service.unshare_preview(preview_id=preview_id)
+        if not ok:
+            return {"status": "error", "error": f"Preview '{preview_id}' not found"}
+        return {"status": "ok", "preview": meta}
 
     def list_active_previews(self) -> list[dict[str, Any]]:
         """Return all active preview slots in the Preview Hub."""

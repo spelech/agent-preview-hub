@@ -66,6 +66,19 @@ class PreviewRetentionService:
                 resolved.add(item_str)
         return sorted(resolved)
 
+    def _remove_associated_share(self, slot_dir: Path) -> None:
+        """Remove any `/s/<token>/` share directory tied to a preview slot."""
+        meta_file = slot_dir / "_meta.json"
+        if not meta_file.exists():
+            return
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            share_token = meta.get("share_token")
+            if share_token:
+                shutil.rmtree(self._previews_dir / "_shares" / str(share_token), ignore_errors=True)
+        except (OSError, ValueError):
+            return
+
     def delete_previews(self, ids_or_patterns: Iterable[str]) -> tuple[int, list[str]]:
         """Delete one or more preview slots by ID or glob pattern."""
         resolved = self.resolve_preview_ids(ids_or_patterns)
@@ -74,6 +87,7 @@ class PreviewRetentionService:
             try:
                 target_dir = self.get_slot_dir(pid)
                 if target_dir.exists() and target_dir.is_dir():
+                    self._remove_associated_share(target_dir)
                     shutil.rmtree(target_dir)
                     self._repo.delete_record(target_dir.name)
                     deleted_ids.append(pid)
@@ -151,6 +165,7 @@ class PreviewRetentionService:
 
             if should_prune:
                 if not dry_run:
+                    self._remove_associated_share(item)
                     shutil.rmtree(item)
                     self._repo.delete_record(item.name)
                 deleted += 1

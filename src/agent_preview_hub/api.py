@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -19,6 +19,7 @@ from .models import (
     MarkdownPublishRequest,
     MermaidPublishRequest,
     PruneRequest,
+    SharePreviewRequest,
 )
 from .publication_service import DEFAULT_PREVIEWS_DIR, PreviewPublicationService
 
@@ -81,6 +82,7 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
                 theme=req.theme,
                 agent=req.agent,
                 keep=req.keep,
+                public=req.public,
             )
             return {"status": "ok", **res}
         except ValueError as exc:
@@ -100,6 +102,7 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
                 keep=req.keep,
                 category=req.category,
                 metadata=req.metadata,
+                public=req.public,
             )
             return {"status": "ok", **res}
         except (ValueError, FileNotFoundError) as exc:
@@ -113,6 +116,7 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
         agent: Annotated[str, Form()] = "Antigravity",
         slug: Annotated[str | None, Form()] = None,
         keep: Annotated[bool, Form()] = False,
+        public: Annotated[bool, Form()] = False,
     ) -> dict[str, Any]:
         if not file.filename:
             raise HTTPException(status_code=400, detail="Missing file name")
@@ -134,6 +138,7 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
                 title=resolved_title,
                 agent=agent,
                 keep=keep,
+                public=public,
             )
             return {"status": "ok", **res}
         except (ValueError, FileNotFoundError) as exc:
@@ -149,6 +154,7 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
                 title=req.title,
                 agent=req.agent,
                 keep=req.keep,
+                public=req.public,
             )
             return {"status": "ok", **res}
         except ValueError as exc:
@@ -164,6 +170,7 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
                 title=req.title,
                 agent=req.agent,
                 keep=req.keep,
+                public=req.public,
             )
             return {"status": "ok", **res}
         except ValueError as exc:
@@ -225,7 +232,11 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
 
     @app.post("/previews/{preview_id}/{action}")
     @app.post("/api/previews/{preview_id}/{action}")
-    async def preview_action_endpoint(preview_id: str, action: str) -> JSONResponse:
+    async def preview_action_endpoint(
+        preview_id: str,
+        action: str,
+        share_req: Annotated[SharePreviewRequest | None, Body()] = None,
+    ) -> JSONResponse:
         if action == "delete":
             count, deleted_ids = service.delete_previews([preview_id])
             if count == 0:
@@ -251,6 +262,27 @@ def create_app(previews_dir: Path | None = None) -> FastAPI:
             return JSONResponse(status_code=200, content={"status": "ok", "preview": meta})
         if action == "unpin":
             ok, meta = service.set_pin_state(preview_id, permanent=False)
+            if not ok:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": f"Preview '{preview_id}' not found"},
+                )
+            return JSONResponse(status_code=200, content={"status": "ok", "preview": meta})
+        if action == "share":
+            try:
+                ok, share_data = service.share_preview(
+                    preview_id, slug=share_req.slug if share_req else None
+                )
+            except ValueError as exc:
+                return JSONResponse(status_code=400, content={"error": str(exc)})
+            if not ok:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": f"Preview '{preview_id}' not found"},
+                )
+            return JSONResponse(status_code=200, content={"status": "ok", **share_data})
+        if action == "unshare":
+            ok, meta = service.unshare_preview(preview_id)
             if not ok:
                 return JSONResponse(
                     status_code=404,

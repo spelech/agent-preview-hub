@@ -26,6 +26,8 @@ class PreviewRecord(BaseModel):
     file_count: int = Field(default=1, ge=0, description="Number of files in slot")
     size_bytes: int = Field(default=0, ge=0, description="Total size in bytes")
     target_port: int | None = Field(default=None, description="Bridged host port if applicable")
+    share_token: str | None = Field(default=None, description="Public capability share token")
+    share_url: str | None = Field(default=None, description="Unauthenticated public HTTPS URL")
 
 
 class MermaidPublishRequest(BaseModel):
@@ -37,6 +39,7 @@ class MermaidPublishRequest(BaseModel):
     theme: str = Field(default="dark", description="Initial theme (dark or default)")
     agent: str = Field(default="Antigravity", description="Agent name")
     keep: bool = Field(default=False, description="Pin permanently")
+    public: bool = Field(default=False, description="Also generate an unauthenticated share link")
 
 
 class MarkdownPublishRequest(BaseModel):
@@ -47,6 +50,7 @@ class MarkdownPublishRequest(BaseModel):
     title: str = Field(default="Markdown Preview", description="Document title")
     agent: str = Field(default="Antigravity", description="Agent name")
     keep: bool = Field(default=False, description="Pin permanently")
+    public: bool = Field(default=False, description="Also generate an unauthenticated share link")
 
 
 class DiffPublishRequest(BaseModel):
@@ -57,6 +61,13 @@ class DiffPublishRequest(BaseModel):
     title: str = Field(default="Code Diff Preview", description="Diff title")
     agent: str = Field(default="Antigravity", description="Agent name")
     keep: bool = Field(default=False, description="Pin permanently")
+    public: bool = Field(default=False, description="Also generate an unauthenticated share link")
+
+
+class SharePreviewRequest(BaseModel):
+    """Optional payload when creating or rotating a public share token."""
+
+    slug: str | None = Field(default=None, description="Optional custom capability token")
 
 
 class BatchDeleteRequest(BaseModel):
@@ -107,6 +118,7 @@ class CadPublishRequest(BaseModel):
     title: str = Field(default="CAD Model Preview", description="Model preview title")
     agent: str = Field(default="Antigravity", description="Authoring agent or operator")
     keep: bool = Field(default=False, description="Pin preview permanently")
+    public: bool = Field(default=False, description="Also generate an unauthenticated share link")
     category: str = Field(default="CAD / 3D", description="Preview category")
     metadata: CadMetadata | None = Field(default=None, description="Optional CAD model metadata")
 

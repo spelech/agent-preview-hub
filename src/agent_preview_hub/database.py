@@ -67,10 +67,19 @@ class PreviewRegistryRepository:
                     expires_at TEXT,
                     file_count INTEGER NOT NULL DEFAULT 1,
                     size_bytes INTEGER NOT NULL DEFAULT 0,
-                    target_port INTEGER
+                    target_port INTEGER,
+                    share_token TEXT,
+                    share_url TEXT
                 );
                 """
             )
+            existing_cols = {
+                row["name"] for row in conn.execute("PRAGMA table_info(previews);").fetchall()
+            }
+            if "share_token" not in existing_cols:
+                conn.execute("ALTER TABLE previews ADD COLUMN share_token TEXT;")
+            if "share_url" not in existing_cols:
+                conn.execute("ALTER TABLE previews ADD COLUMN share_url TEXT;")
             conn.commit()
 
     def upsert_record(self, record: PreviewRecord) -> None:
@@ -81,8 +90,9 @@ class PreviewRegistryRepository:
                 INSERT INTO previews (
                     id, title, agent, category, tags_json, description,
                     entrypoint, url, lan_url, permanent, created_at,
-                    updated_at, expires_at, file_count, size_bytes, target_port
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    updated_at, expires_at, file_count, size_bytes, target_port,
+                    share_token, share_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     agent = excluded.agent,
@@ -97,7 +107,9 @@ class PreviewRegistryRepository:
                     expires_at = excluded.expires_at,
                     file_count = excluded.file_count,
                     size_bytes = excluded.size_bytes,
-                    target_port = excluded.target_port;
+                    target_port = excluded.target_port,
+                    share_token = excluded.share_token,
+                    share_url = excluded.share_url;
                 """,
                 (
                     record.id,
@@ -116,6 +128,8 @@ class PreviewRegistryRepository:
                     record.file_count,
                     record.size_bytes,
                     record.target_port,
+                    record.share_token,
+                    record.share_url,
                 ),
             )
             conn.commit()
@@ -142,6 +156,7 @@ class PreviewRegistryRepository:
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> PreviewRecord:
+        keys = row.keys()
         return PreviewRecord(
             id=row["id"],
             title=row["title"],
@@ -159,6 +174,8 @@ class PreviewRegistryRepository:
             file_count=int(row["file_count"]),
             size_bytes=int(row["size_bytes"]),
             target_port=row["target_port"],
+            share_token=row["share_token"] if "share_token" in keys else None,
+            share_url=row["share_url"] if "share_url" in keys else None,
         )
 
     def sync_with_filesystem(self) -> list[dict]:
@@ -215,6 +232,13 @@ class PreviewRegistryRepository:
             except (TypeError, ValueError):
                 target_port_int = None
 
+            share_token = meta.get("share_token") or None
+            if share_token and not (self._previews_dir / "_shares" / str(share_token)).exists():
+                share_token = None
+            share_url = (
+                f"https://{self._base_domain}/s/{share_token}/" if share_token else None
+            )
+
             rec = PreviewRecord(
                 id=item.name,
                 title=meta.get("title") or item.name.replace("-", " ").replace("_", " ").title(),
@@ -232,6 +256,8 @@ class PreviewRegistryRepository:
                 file_count=file_count,
                 size_bytes=size_bytes,
                 target_port=target_port_int,
+                share_token=str(share_token) if share_token else None,
+                share_url=share_url,
             )
             self.upsert_record(rec)
             records.append(rec)

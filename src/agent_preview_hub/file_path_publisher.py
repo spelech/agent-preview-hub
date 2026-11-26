@@ -74,6 +74,13 @@ class FilePathPublisher:
         """Write _meta.json and return metadata dict with expiration timestamp."""
         now = datetime.datetime.now(datetime.UTC)
         expires_at = None if keep else (now + datetime.timedelta(days=ttl_days)).isoformat()
+        prior: dict[str, Any] = {}
+        meta_path = slot_dir / "_meta.json"
+        if meta_path.exists():
+            try:
+                prior = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                prior = {}
         meta: dict[str, Any] = {
             "id": slot_dir.name,
             "title": resolved_title,
@@ -83,9 +90,13 @@ class FilePathPublisher:
             "description": description,
             "entrypoint": entrypoint,
             "permanent": bool(keep),
-            "created_at": now.isoformat(),
+            "created_at": prior.get("created_at") or now.isoformat(),
             "updated_at": now.isoformat(),
             "expires_at": expires_at,
         }
-        (slot_dir / "_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        if prior.get("share_token"):
+            meta["share_token"] = prior["share_token"]
+            if prior.get("share_url"):
+                meta["share_url"] = prior["share_url"]
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
         return meta, expires_at

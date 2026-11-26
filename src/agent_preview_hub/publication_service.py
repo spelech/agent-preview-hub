@@ -23,6 +23,7 @@ from .mermaid_sanitizer import (
 from .mermaid_studio_renderer import MermaidStudioRenderer
 from .port_bridge_renderer import PortBridgeRenderer
 from .retention_service import DEFAULT_TTL_DAYS, PreviewRetentionService
+from .share_service import PreviewShareService
 from .slug_generator import SlugGenerator
 
 DEFAULT_PREVIEWS_DIR = Path(
@@ -34,7 +35,7 @@ LAN_DOMAIN = "preview.lan"
 
 
 class PreviewPublicationService:
-    """Orchestrates preview slot creation, short-slug generation, and delegates retention."""
+    """Orchestrates preview slot creation, short-slug generation, sharing, and retention."""
 
     def __init__(
         self,
@@ -48,43 +49,38 @@ class PreviewPublicationService:
         self._lan_domain = lan_domain
         self._tap = tap or DiagnosticTapRingBuffer()
         self._repo = PreviewRegistryRepository(
-            self._previews_dir,
-            base_domain=self._base_domain,
-            lan_domain=self._lan_domain,
+            self._previews_dir, base_domain=self._base_domain, lan_domain=self._lan_domain
         )
         self._retention = PreviewRetentionService(
+            previews_dir=self._previews_dir, repo=self._repo, tap=self._tap
+        )
+        self._shares = PreviewShareService(
             previews_dir=self._previews_dir,
             repo=self._repo,
             tap=self._tap,
+            base_domain=self._base_domain,
+            lan_domain=self._lan_domain,
         )
 
     @property
     def previews_dir(self) -> Path:
-        """Return active previews directory."""
         return self._previews_dir
 
     @property
     def tap(self) -> DiagnosticTapRingBuffer:
-        """Return diagnostic tap ring buffer."""
         return self._tap
 
     @staticmethod
     def clean_slug(preview_id: str) -> str:
-        """Sanitize a preview ID into a URL-safe slug."""
         return PreviewRetentionService.clean_slug(preview_id)
 
     @staticmethod
     def generate_short_slug(content: str, prefix: str = "m") -> str:
-        """Generate a deterministic 7-character short slug (e.g. m-8f3a1) so URLs stay <30 chars."""
         return SlugGenerator.generate_short_slug(content, prefix=prefix)
 
     def generate_cad_slug(
-        self,
-        content: bytes | str,
-        file_name: str = "",
-        prefix: str = "cad",
+        self, content: bytes | str, file_name: str = "", prefix: str = "cad"
     ) -> str:
-        """Generate a deterministic short slug (cad-<5hex>) with collision checking against existing slots."""
         return SlugGenerator.generate_cad_slug(
             content=content,
             file_name=file_name,
@@ -94,8 +90,17 @@ class PreviewPublicationService:
         )
 
     def get_slot_dir(self, preview_id: str) -> Path:
-        """Resolve directory path for a given preview slug."""
         return self._retention.get_slot_dir(preview_id)
+
+    def _sync_share_if_needed(
+        self, slot_name: str, meta: dict[str, Any], public: bool, result: dict[str, Any]
+    ) -> None:
+        if public or meta.get("share_token"):
+            ok, share_data = self._shares.share_preview(slot_name)
+            if ok:
+                result["share_token"] = share_data["share_token"]
+                result["share_url"] = share_data["share_url"]
+                result["lan_share_url"] = share_data["lan_share_url"]
 
     def _write_slot(
         self,
@@ -109,9 +114,18 @@ class PreviewPublicationService:
         keep: bool = False,
         target_port: int | None = None,
         extra_meta: dict[str, Any] | None = None,
+        public: bool = False,
     ) -> dict[str, Any]:
         slot_dir = self.get_slot_dir(slug)
         slot_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+        meta_path = slot_dir / "_meta.json"
+        prior: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                prior = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                prior = {}
+
         index_file = slot_dir / "index.html"
         index_file.write_text(html_content, encoding="utf-8")
         index_file.chmod(0o644)
@@ -127,18 +141,22 @@ class PreviewPublicationService:
             "description": description,
             "entrypoint": "index.html",
             "permanent": bool(keep),
-            "created_at": now.isoformat(),
+            "created_at": prior.get("created_at") or now.isoformat(),
             "updated_at": now.isoformat(),
             "expires_at": expires_at,
         }
+        if prior.get("share_token"):
+            meta["share_token"] = prior["share_token"]
+            if prior.get("share_url"):
+                meta["share_url"] = prior["share_url"]
         if target_port is not None:
             meta["target_port"] = int(target_port)
         if extra_meta:
             meta.update(extra_meta)
 
-        (slot_dir / "_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self._repo.sync_with_filesystem()
-        result = {
+        result: dict[str, Any] = {
             "id": slot_dir.name,
             "title": meta["title"],
             "category": category,
@@ -147,6 +165,7 @@ class PreviewPublicationService:
             "permanent": bool(keep),
             "expires_at": expires_at,
         }
+        self._sync_share_if_needed(slot_dir.name, meta, public, result)
         self._tap.record("publish_slot", result)
         return result
 
@@ -161,20 +180,18 @@ class PreviewPublicationService:
         keep: bool = False,
         category: str = "CAD / 3D",
         metadata: Any = None,
+        public: bool = False,
     ) -> dict[str, Any]:
-        """Publish a 3D model asset and interactive preview viewer under a short slug (cad-<5hex>)."""
+        """Publish a 3D model asset and interactive preview viewer under a short slug."""
         if file_name is None:
-            if file_path is not None:
-                file_name = Path(file_path).name
-            else:
+            if file_path is None:
                 raise ValueError("file_name or file_path must be provided")
-
+            file_name = Path(file_path).name
         if not CadStagingRenderer.is_cad_file(file_name):
             raise ValueError(f"Unsupported CAD file extension: {Path(file_name).suffix}")
 
-        content_for_hash: bytes | str
         if file_bytes is not None:
-            content_for_hash = file_bytes
+            content_for_hash: bytes | str = file_bytes
         elif file_path is not None:
             src = Path(file_path).resolve()
             if not src.exists():
@@ -188,7 +205,6 @@ class PreviewPublicationService:
             if slug
             else self.generate_cad_slug(content_for_hash, file_name=file_name, prefix="cad")
         )
-
         slot_dir = self.get_slot_dir(resolved_slug)
         viewer_html, staged_file, fmt, size_bytes, meta_extra = (
             CadStagingRenderer.stage_and_render_cad(
@@ -216,11 +232,14 @@ class PreviewPublicationService:
             description=f"Interactive 3D model preview ({staged_file.name})",
             keep=keep,
             extra_meta=meta_extra,
+            public=public,
         )
-        pub["file_name"] = file_name
-        pub["format"] = fmt
-        pub["size_bytes"] = size_bytes
-        pub["file_count"] = len([f for f in slot_dir.iterdir() if f.is_file()])
+        pub.update(
+            file_name=file_name,
+            format=fmt,
+            size_bytes=size_bytes,
+            file_count=len([f for f in slot_dir.iterdir() if f.is_file()]),
+        )
         return pub
 
     def publish_mermaid(
@@ -232,8 +251,9 @@ class PreviewPublicationService:
         agent: str = "Antigravity",
         keep: bool = False,
         shorten_external: bool = False,
+        public: bool = False,
     ) -> dict[str, Any]:
-        """Sanitize and publish a Mermaid diagram to an interactive studio slot with a short URL."""
+        """Sanitize and publish a Mermaid diagram to an interactive studio slot."""
         sanitized = sanitize_mermaid_code(code)
         if not sanitized:
             raise ValueError("Mermaid diagram code cannot be empty")
@@ -258,20 +278,23 @@ class PreviewPublicationService:
             tags=["Mermaid", "Diagram"],
             description="Interactive Mermaid Studio diagram",
             keep=keep,
+            public=public,
         )
-        short_url = shorten_external_url(direct_url) if shorten_external else None
-        markdown = f"```mermaid\n{sanitized}\n```\n\n{pub['lan_url']}\n{pub['url']}\n"
-        return {
+        out: dict[str, Any] = {
             "id": pub["id"],
             "code": sanitized,
             "lan_url": pub["lan_url"],
             "remote_url": pub["url"],
             "url": pub["lan_url"],
             "direct_url": direct_url,
-            "short_url": short_url,
+            "short_url": shorten_external_url(direct_url) if shorten_external else None,
             "preview": {"lan": pub["lan_url"], "remote": pub["url"]},
-            "markdown": markdown,
+            "markdown": f"```mermaid\n{sanitized}\n```\n\n{pub['lan_url']}\n{pub['url']}\n",
         }
+        if "share_url" in pub:
+            out["share_token"] = pub["share_token"]
+            out["share_url"] = pub["share_url"]
+        return out
 
     def publish_markdown(
         self,
@@ -280,16 +303,15 @@ class PreviewPublicationService:
         title: str = "Markdown Preview",
         agent: str = "Antigravity",
         keep: bool = False,
+        public: bool = False,
     ) -> dict[str, Any]:
-        """Publish a rich GFM Markdown document (with tables, alerts, and embedded Mermaid)."""
+        """Publish a rich GFM Markdown document."""
         if not markdown_text.strip():
             raise ValueError("Markdown text cannot be empty")
         resolved_slug = (
             self.clean_slug(slug) if slug else self.generate_short_slug(markdown_text, prefix="md")
         )
-        html_doc = MarkdownDiffRenderer.render_markdown_html(
-            title=title, markdown_text=markdown_text
-        )
+        html_doc = MarkdownDiffRenderer.render_markdown_html(title=title, markdown_text=markdown_text)
         return self._write_slot(
             slug=resolved_slug,
             html_content=html_doc,
@@ -299,6 +321,7 @@ class PreviewPublicationService:
             tags=["Markdown", "Document"],
             description="Rich Markdown & Table Preview",
             keep=keep,
+            public=public,
         )
 
     def publish_diff(
@@ -308,6 +331,7 @@ class PreviewPublicationService:
         title: str = "Code Diff Preview",
         agent: str = "Antigravity",
         keep: bool = False,
+        public: bool = False,
     ) -> dict[str, Any]:
         """Publish a syntax-highlighted unified diff viewer."""
         if not diff_text.strip():
@@ -325,6 +349,7 @@ class PreviewPublicationService:
             tags=["Diff", "Code Review"],
             description="Unified Code Diff Viewer",
             keep=keep,
+            public=public,
         )
 
     def publish_text(
@@ -337,6 +362,7 @@ class PreviewPublicationService:
         tags: list[str] | None = None,
         description: str = "",
         keep: bool = False,
+        public: bool = False,
     ) -> dict[str, Any]:
         """Publish inline HTML or text snippet."""
         resolved_title = title or preview_id.replace("-", " ").replace("_", " ").title()
@@ -350,6 +376,7 @@ class PreviewPublicationService:
             tags=tags or ["Snippet"],
             description=description,
             keep=keep,
+            public=public,
         )
 
     def publish_path(
@@ -362,8 +389,9 @@ class PreviewPublicationService:
         tags: list[str] | None = None,
         description: str = "",
         keep: bool = False,
+        public: bool = False,
     ) -> dict[str, Any]:
-        """Publish a directory, HTML file, image, Markdown doc, Mermaid file, or diff."""
+        """Publish a directory, HTML file, image, Markdown doc, Mermaid file, CAD, or diff."""
         source = Path(source_path).resolve()
         if not source.exists():
             raise FileNotFoundError(f"Source '{source_path}' does not exist.")
@@ -373,59 +401,30 @@ class PreviewPublicationService:
             ext = source.suffix.lower()
             if ext in (".mmd", ".mermaid"):
                 return self.publish_mermaid(
-                    code=source.read_text(encoding="utf-8"),
-                    slug=preview_id,
-                    title=resolved_title,
-                    agent=agent,
-                    keep=keep,
+                    source.read_text(encoding="utf-8"), preview_id, resolved_title, agent=agent, keep=keep, public=public
                 )
             if CadStagingRenderer.is_cad_file(source):
                 return self.publish_cad(
-                    file_name=source.name,
-                    file_path=source,
-                    slug=preview_id,
-                    title=resolved_title,
-                    agent=agent,
-                    keep=keep,
+                    file_name=source.name, file_path=source, slug=preview_id, title=resolved_title, agent=agent, keep=keep, public=public
                 )
             if ext in (".md", ".markdown"):
                 return self.publish_markdown(
-                    markdown_text=source.read_text(encoding="utf-8"),
-                    slug=preview_id,
-                    title=resolved_title,
-                    agent=agent,
-                    keep=keep,
+                    source.read_text(encoding="utf-8"), preview_id, resolved_title, agent=agent, keep=keep, public=public
                 )
             if ext in (".diff", ".patch"):
                 return self.publish_diff(
-                    diff_text=source.read_text(encoding="utf-8"),
-                    slug=preview_id,
-                    title=resolved_title,
-                    agent=agent,
-                    keep=keep,
+                    source.read_text(encoding="utf-8"), preview_id, resolved_title, agent=agent, keep=keep, public=public
                 )
 
         slot_dir = self.get_slot_dir(preview_id)
         resolved_category, entrypoint = FilePathPublisher.stage_source_into_slot(
-            source=source,
-            slot_dir=slot_dir,
-            resolved_title=resolved_title,
-            category=category,
+            source=source, slot_dir=slot_dir, resolved_title=resolved_title, category=category
         )
-
-        FilePathPublisher.write_path_metadata(
-            slot_dir=slot_dir,
-            resolved_title=resolved_title,
-            resolved_category=resolved_category,
-            entrypoint=entrypoint,
-            agent=agent,
-            tags=tags,
-            description=description,
-            keep=keep,
-            ttl_days=DEFAULT_TTL_DAYS,
+        meta, _ = FilePathPublisher.write_path_metadata(
+            slot_dir, resolved_title, resolved_category, entrypoint, agent, tags, description, keep, DEFAULT_TTL_DAYS
         )
         self._repo.sync_with_filesystem()
-        result = {
+        result: dict[str, Any] = {
             "id": slot_dir.name,
             "title": resolved_title,
             "category": resolved_category,
@@ -433,6 +432,7 @@ class PreviewPublicationService:
             "lan_url": f"http://{self._lan_domain}/{slot_dir.name}/",
             "permanent": bool(keep),
         }
+        self._sync_share_if_needed(slot_dir.name, meta, public, result)
         self._tap.record("publish_path", result)
         return result
 
@@ -467,27 +467,31 @@ class PreviewPublicationService:
         pub["lan_port_url"] = f"http://10.0.0.10:{port_str}/"
         return pub
 
+    def share_preview(
+        self, preview_id: str, slug: str | None = None
+    ) -> tuple[bool, dict[str, Any]]:
+        """Generate or refresh an unauthenticated `/s/<token>/` share link."""
+        return self._shares.share_preview(preview_id=preview_id, slug=slug)
+
+    def unshare_preview(self, preview_id: str) -> tuple[bool, dict[str, Any]]:
+        """Revoke the unauthenticated `/s/<token>/` share link."""
+        return self._shares.unshare_preview(preview_id=preview_id)
+
     def list_previews(self) -> list[dict[str, Any]]:
-        """Rebuild and return all active preview records."""
         return self._repo.sync_with_filesystem()
 
     def resolve_preview_ids(self, ids_or_patterns: Iterable[str]) -> list[str]:
-        """Resolve exact preview IDs or glob wildcard patterns."""
         return self._retention.resolve_preview_ids(ids_or_patterns)
 
     def delete_previews(self, ids_or_patterns: Iterable[str]) -> tuple[int, list[str]]:
-        """Delete one or more preview slots by ID or glob pattern."""
         return self._retention.delete_previews(ids_or_patterns)
 
     def set_pin_state(self, preview_id: str, permanent: bool) -> tuple[bool, dict[str, Any]]:
-        """Pin or unpin a preview slot."""
         return self._retention.set_pin_state(preview_id, permanent)
 
     def prune_previews(
-        self,
-        all_unpinned: bool = False,
-        days: int | None = None,
-        dry_run: bool = False,
+        self, all_unpinned: bool = False, days: int | None = None, dry_run: bool = False
     ) -> int:
-        """Prune expired, old, or unpinned preview slots."""
-        return self._retention.prune_previews(all_unpinned=all_unpinned, days=days, dry_run=dry_run)
+        return self._retention.prune_previews(
+            all_unpinned=all_unpinned, days=days, dry_run=dry_run
+        )

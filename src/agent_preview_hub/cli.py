@@ -13,11 +13,19 @@ from .cad_staging_renderer import CadStagingRenderer
 from .publication_service import DEFAULT_PREVIEWS_DIR, PreviewPublicationService
 
 
-def _print_short_links(title: str, lan_url: str, remote_url: str, slot_id: str) -> None:
+def _print_short_links(
+    title: str,
+    lan_url: str,
+    remote_url: str,
+    slot_id: str,
+    share_url: str | None = None,
+) -> None:
     """Print single-line terminal-safe links (<39 chars) that never wrap across lines."""
     print(f"\n✅ Published [{slot_id}]: {title}")
     print(lan_url)
     print(remote_url)
+    if share_url:
+        print(f"🔓 Public (No Auth): {share_url}")
 
 
 def main_mermaid_live(argv: list[str] | None = None) -> int:
@@ -98,6 +106,7 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     p_pub.add_argument("--tags", help="Comma-separated tags")
     p_pub.add_argument("--description", default="", help="Short description")
     p_pub.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_pub.add_argument("--public", action="store_true", help="Also generate unauthenticated /s/<token>/ link")
 
     # text
     p_text = subparsers.add_parser("text", help="Publish inline HTML or text directly")
@@ -109,6 +118,7 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     p_text.add_argument("--tags", help="Comma-separated tags")
     p_text.add_argument("--description", default="", help="Short description")
     p_text.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_text.add_argument("--public", action="store_true", help="Also generate unauthenticated /s/<token>/ link")
 
     # mermaid
     p_mmd = subparsers.add_parser("mermaid", help="Publish an interactive Mermaid Studio diagram")
@@ -116,6 +126,7 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     p_mmd.add_argument("content", nargs="?", default="-", help="Mermaid code or '-' for stdin")
     p_mmd.add_argument("--title", default="Mermaid Diagram", help="Diagram title")
     p_mmd.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_mmd.add_argument("--public", action="store_true", help="Also generate unauthenticated /s/<token>/ link")
 
     # md / markdown
     p_md = subparsers.add_parser("md", help="Publish rich GitHub-Flavored Markdown & tables")
@@ -125,6 +136,7 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     )
     p_md.add_argument("--title", default="Markdown Preview", help="Document title")
     p_md.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_md.add_argument("--public", action="store_true", help="Also generate unauthenticated /s/<token>/ link")
 
     # diff
     p_diff = subparsers.add_parser("diff", help="Publish syntax-highlighted unified diff")
@@ -134,6 +146,7 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     )
     p_diff.add_argument("--title", default="Code Diff Preview", help="Diff title")
     p_diff.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_diff.add_argument("--public", action="store_true", help="Also generate unauthenticated /s/<token>/ link")
 
     # port
     p_port = subparsers.add_parser("port", help="Register a live dev server or container port")
@@ -155,8 +168,17 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
     p_cad.add_argument("--title", help="Human-readable title (defaults to filename)")
     p_cad.add_argument("--agent", default="Antigravity", help="Agent or author name")
     p_cad.add_argument("--keep", action="store_true", help="Pin preview permanently")
+    p_cad.add_argument("--public", action="store_true", help="Also generate unauthenticated /s/<token>/ link")
     p_cad.add_argument("--open", action="store_true", help="Open preview in browser immediately")
     p_cad.add_argument("--json", action="store_true", help="Output full result as JSON")
+
+    # share / unshare
+    p_share = subparsers.add_parser("share", help="Generate an unauthenticated /s/<token>/ share link")
+    p_share.add_argument("id", help="Preview ID to share")
+    p_share.add_argument("--slug", help="Optional custom capability token")
+
+    p_unshare = subparsers.add_parser("unshare", help="Revoke an unauthenticated /s/<token>/ share link")
+    p_unshare.add_argument("id", help="Preview ID to unshare")
 
     # list / delete / pin / unpin / prune / serve
     subparsers.add_parser("list", help="List all active previews")
@@ -195,12 +217,14 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             tags=tags,
             description=args.description,
             keep=args.keep,
+            public=args.public,
         )
         _print_short_links(
             res.get("title", args.id),
             res["lan_url"],
             res.get("url") or res.get("remote_url", ""),
             res["id"],
+            res.get("share_url"),
         )
     elif args.command == "text":
         content = sys.stdin.read() if args.content == "-" else args.content
@@ -214,12 +238,19 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             tags=tags,
             description=args.description,
             keep=args.keep,
+            public=args.public,
         )
-        _print_short_links(res["title"], res["lan_url"], res["url"], res["id"])
+        _print_short_links(
+            res["title"], res["lan_url"], res["url"], res["id"], res.get("share_url")
+        )
     elif args.command == "mermaid":
         raw = sys.stdin.read() if args.content == "-" else args.content
-        res = service.publish_mermaid(code=raw, slug=args.id, title=args.title, keep=args.keep)
-        _print_short_links(args.title, res["lan_url"], res["remote_url"], res["id"])
+        res = service.publish_mermaid(
+            code=raw, slug=args.id, title=args.title, keep=args.keep, public=args.public
+        )
+        _print_short_links(
+            args.title, res["lan_url"], res["remote_url"], res["id"], res.get("share_url")
+        )
     elif args.command == "md":
         if args.content == "-":
             raw = sys.stdin.read()
@@ -228,9 +259,11 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
         else:
             raw = args.content
         res = service.publish_markdown(
-            markdown_text=raw, slug=args.id, title=args.title, keep=args.keep
+            markdown_text=raw, slug=args.id, title=args.title, keep=args.keep, public=args.public
         )
-        _print_short_links(res["title"], res["lan_url"], res["url"], res["id"])
+        _print_short_links(
+            res["title"], res["lan_url"], res["url"], res["id"], res.get("share_url")
+        )
     elif args.command == "diff":
         if args.content == "-":
             raw = sys.stdin.read()
@@ -238,8 +271,12 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             raw = Path(args.content).read_text(encoding="utf-8")
         else:
             raw = args.content
-        res = service.publish_diff(diff_text=raw, slug=args.id, title=args.title, keep=args.keep)
-        _print_short_links(res["title"], res["lan_url"], res["url"], res["id"])
+        res = service.publish_diff(
+            diff_text=raw, slug=args.id, title=args.title, keep=args.keep, public=args.public
+        )
+        _print_short_links(
+            res["title"], res["lan_url"], res["url"], res["id"], res.get("share_url")
+        )
     elif args.command == "port":
         tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else None
         res = service.publish_port(
@@ -272,6 +309,7 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             title=title,
             agent=args.agent,
             keep=args.keep,
+            public=args.public,
         )
         if args.json:
             import json
@@ -283,11 +321,30 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
                 res["lan_url"],
                 res.get("url") or res.get("remote_url", ""),
                 res["id"],
+                res.get("share_url"),
             )
         if args.open:
             import webbrowser
 
             webbrowser.open(res["lan_url"])
+    elif args.command == "share":
+        try:
+            ok, share_data = service.share_preview(args.id, slug=args.slug)
+        except ValueError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        if not ok:
+            sys.stderr.write(f"Error: Preview '{args.id}' not found.\n")
+            return 1
+        print(f"\n🔓 Public Share Ready [{share_data['id']}]")
+        print(share_data["share_url"])
+        print(share_data["lan_share_url"])
+    elif args.command == "unshare":
+        ok, _ = service.unshare_preview(args.id)
+        if not ok:
+            sys.stderr.write(f"Error: Preview '{args.id}' not found.\n")
+            return 1
+        print(f"🔒 Revoked public share for '{args.id}'")
     elif args.command == "list":
         previews = service.list_previews()
         if not previews:
@@ -295,7 +352,8 @@ def main_agent_preview(argv: list[str] | None = None) -> int:
             return 0
         for p in previews:
             pin = "📌" if p.get("permanent") else "⏳"
-            print(f"{pin} {p['id']:<18} {p['lan_url']:<34} {p['title']}")
+            pub_tag = f" [PUBLIC: {p['share_url']}]" if p.get("share_url") else ""
+            print(f"{pin} {p['id']:<18} {p['lan_url']:<34} {p['title']}{pub_tag}")
     elif args.command == "delete":
         _, deleted = service.delete_previews(args.id)
         for pid in deleted:
